@@ -1,0 +1,90 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create a modern web application stack
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Bucket Name to host static website
+  ArtifactS3BucketName:
+    Type: String
+    Description: Bucket Name to host Build artifacts
+  DockerImageUrl:
+    Type: String
+    Description: Docker image for the ECS Task definition
+  
+Resources:
+  staticwebsite:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 'https://mani250316.s3.amazonaws.com/staticwebsite.yml'
+      Parameters:
+        S3BucketName: !Ref S3BucketName
+  vpcstack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 'https://mani250316.s3.amazonaws.com/vpc.yml'
+  appservices:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://mani250316.s3.amazonaws.com/appservices.yml
+      Parameters:
+        vpcid: !GetAtt vpcstack.Outputs.VpcId
+        dockerimageurl: !Ref DockerImageUrl
+  cognitouserpools:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://mani250316.s3.amazonaws.com/cognito.yml
+  dynamodb:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: https://mani250316.s3.amazonaws.com/dynamodb.yml
+      Parameters:
+        VpcId: !GetAtt vpcstack.Outputs.VpcId
+        PrivateRouteTable: !GetAtt vpcstack.Outputs.privateroutetableid
+  loadbalancer:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 'https://mani250316.s3.amazonaws.com/loadbalancer.yml'
+      Parameters:
+        VpcId: !GetAtt vpcstack.Outputs.VpcId
+        PublicSubnetA: !GetAtt vpcstack.Outputs.WebAsubnetid
+        PublicSubnetB: !GetAtt vpcstack.Outputs.WebBsubnetid
+  ecsservice:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 'https://mani250316.s3.amazonaws.com/service.yml'
+      Parameters:
+        mysfitsecscluster:  !GetAtt appservices.Outputs.MysfitsClusterName
+        mysfitstaskdefinition: !GetAtt appservices.Outputs.MysfitsTaskDefintionARN
+        mysfitstargetgrp: !GetAtt loadbalancer.Outputs.targetgrparn
+        VpcId: !GetAtt vpcstack.Outputs.VpcId
+        PrivateSubnetA: !GetAtt vpcstack.Outputs.AppAsubnetid
+        PrivateSubnetB: !GetAtt vpcstack.Outputs.AppBsubnetid
+  cicdpipeline:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 'https://mani250316.s3.amazonaws.com/cicdpipeline.yml'
+      Parameters:
+        ECSClusterName: !GetAtt appservices.Outputs.MysfitsClusterName
+        ECSServiceName: !GetAtt ecsservice.Outputs.ServiceName
+        ArtifactS3BucketName: !Ref ArtifactS3BucketName
+  apigateway:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 'https://mani250316.s3.amazonaws.com/api.yml'
+      Parameters:
+        loadbalancerarn: !GetAtt loadbalancer.Outputs.loadbalancerarn
+        loadbalancerdns: !GetAtt loadbalancer.Outputs.loadbalancerdns
+        SourceBucket: 'source250316'
+        DestinationBucket: 'mani250316'
+        CognitoUserPoolId: !GetAtt cognitouserpools.Outputs.userpoolarn 
+        
+        
+Outputs:
+  websiteurl:
+    Description: URL for the websiteurl
+    Value: 
+      Fn::Join:
+        - ''
+        - - 'http://'
+          - !Ref S3BucketName
+          - '.s3-website-us-east-1.amazonaws.com'

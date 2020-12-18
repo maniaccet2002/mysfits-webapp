@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Stack to create AWS sample modern web application
+Parameters:
+  VpcId:
+    Type: String
+    Description: VPC ID
+  PrivateRouteTable:
+    Type: String
+    Description: Private Route table
+Resources:
+  mysfitstable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: "MysfitsTable"
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      AttributeDefinitions:
+        - AttributeName: "MysfitId"
+          AttributeType: "S"
+        - AttributeName: "GoodEvil"
+          AttributeType: "S"
+        - AttributeName: "LawChaos"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "MysfitId"
+          KeyType: "HASH"
+      GlobalSecondaryIndexes:
+        - IndexName: "LawChaosIndex"
+          KeySchema:
+            - AttributeName: "LawChaos"
+              KeyType: "HASH"
+            - AttributeName: "MysfitId"
+              KeyType: "RANGE"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+          Projection:
+            ProjectionType: "ALL"
+        - IndexName: "GoodEvilIndex"
+          KeySchema:
+            - AttributeName: "GoodEvil"
+              KeyType: "HASH"
+            - AttributeName: "MysfitId"
+              KeyType: "RANGE"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+          Projection:
+            ProjectionType: "ALL"
+  mysfitsvpcendpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VpcId
+      VpcEndpointType: 'Gateway'
+      ServiceName: !Join [ "", [ "com.amazonaws.", { "Ref": "AWS::Region" }, ".dynamodb" ] ]
+      RouteTableIds: 
+        - !Ref PrivateRouteTable
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: "*"
+            Principal: "*"
+            Resource: "*"

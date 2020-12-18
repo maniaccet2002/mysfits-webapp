@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Template to create CI/CD pipeline'
+Parameters:
+  ECSClusterName:
+    Type: String
+    Description: ECS cluster name
+  ECSServiceName:
+    Type: String
+    Description: ECS Service Name
+  ArtifactS3BucketName:
+    Type: String
+    Description: Bucket Name to store build artifacts for CICD Pipeline
+Resources:
+  mysfitsartifact:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref ArtifactS3BucketName
+      VersioningConfiguration:
+        Status: Enabled
+  mysfitsartifactpolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactS3BucketName
+      PolicyDocument:
+        Statement:
+          - Sid: 'whitelistedGet'
+            Action: 
+              - 's3:GetObject'
+            Effect: 'Allow'
+            Principal: 
+              AWS:
+                - !GetAtt MysfitsCodePipelineServiceRole.Arn
+                - !GetAtt MysfitsCodeBuildServiceRole.Arn
+            Resource: 
+              'Fn::Join':
+                - ''
+                - - !GetAtt mysfitsartifact.Arn
+                  - '/*'
+          - Sid: 'WhitelistedPut'
+            Action:
+              - 's3:putObject'
+            Effect: 'Allow'
+            Principal:
+              AWS:
+                - !GetAtt MysfitsCodeBuildServiceRole.Arn
+                - !GetAtt MysfitsCodePipelineServiceRole.Arn
+            Resource:
+              'Fn::Join':
+                - ''
+                - - !GetAtt mysfitsartifact.Arn
+                  - '/*'
+  MysfitsCodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MysfitsCodePipelineServiceRole
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - codepipeline.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: Mysfits-codepipeline-service-policy
+        PolicyDocument:
+          Statement:
+          - Action:
+            - codecommit:GetBranch
+            - codecommit:GetCommit
+            - codecommit:UploadArchive
+            - codecommit:GetUploadArchiveStatus
+            - codecommit:CancelUploadArchive
+            Resource: "*"
+            Effect: Allow
+          - Action:
+            - s3:GetObject
+            - s3:GetObjectVersion
+            - s3:GetBucketVersioning
+            Resource: "*"
+            Effect: Allow
+          - Action:
+            - s3:PutObject
+            Resource:
+            - arn:aws:s3:::*
+            Effect: Allow
+          - Action:
+            - elasticloadbalancing:*
+            - autoscaling:*
+            - cloudwatch:*
+            - ecs:*
+            - codebuild:*
+            - iam:PassRole
+            Resource: "*"
+            Effect: Allow
+          Version: "2012-10-17"
+  MysfitsCodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: MysfitsCodeBuildServiceRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: "MysfitsService-CodeBuildServicePolicy"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+            - "codecommit:ListBranches"
+            - "codecommit:ListRepositories"
+            - "codecommit:BatchGetRepositories"
+            - "codecommit:Get*"
+            - "codecommit:GitPull"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "logs:CreateLogGroup"
+            - "logs:CreateLogStream"
+            - "logs:PutLogEvents"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "s3:PutObject"
+            - "s3:GetObject"
+            - "s3:GetObjectVersion"
+            - "s3:ListBucket"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "ecr:GetDownloadUrlForLayer"
+            - "ecr:GetAuthorizationToken"
+            - "ecr:UploadLayerPart"
+            - "ecr:PutImage"
+            - "ecr:BatchGetImage"
+            - "ecr:CompleteLayerUpload"
+            - "ecr:InitiateLayerUpload"
+            - "ecr:BatchCheckLayerAvailability"
+            Resource: "*"
+  coderepo:
+    Type: AWS::CodeCommit::Repository
+    Properties:
+      RepositoryName: mysfits-app
+      RepositoryDescription: Code Commit repository for mysfits application
+  codebuild:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: mysfits-app-build
+      Description: Code Build for mysfits application
+      ServiceRole: !GetAtt MysfitsCodeBuildServiceRole.Arn
+      Source:
+        Type: CODECOMMIT
+        Location: !GetAtt coderepo.CloneUrlHttp
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: 'aws/codebuild/python:3.5.2'
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: 'AWS_ACCOUNT_ID'
+            Value: !Ref AWS::AccountId
+          - Name: 'AWS_DEFAULT_REGION'
+            Value: !Ref AWS::Region
+      Artifacts:
+        Type: NO_ARTIFACTS
+  codepipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: mysfits-app-codepipeline
+      RoleArn: !GetAtt MysfitsCodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref mysfitsartifact
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: mysfits-codecommit
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              Configuration:
+                RepositoryName: !GetAtt coderepo.Name
+                BranchName: master
+                PollForSourceChanges: False
+                OutputArtifactFormat: CODE_ZIP
+              OutputArtifacts:
+                - Name: mysfitsapp-SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: mysfits-build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codebuild
+                PrimarySource: mysfitsapp-SourceArtifact
+              InputArtifacts:
+                - Name: mysfitsapp-SourceArtifact
+              OutputArtifacts:
+                - Name: mysfitsapp-BuildArtifact
+        - Name: Deploy
+          Actions:
+            - Name: mysfits-deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: 1
+              Configuration:
+                ClusterName:  !Ref ECSClusterName
+                ServiceName:  !Ref ECSServiceName
+                DeploymentTimeout: 15
+              InputArtifacts:
+                - Name: mysfitsapp-BuildArtifact

@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create API gateway
+Parameters:
+  loadbalancerarn:
+    Type: String
+    Description: 'Network Load balancer ARN'
+  loadbalancerdns:
+    Type: String
+    Description: 'Network Load balancer ARN'
+  SourceBucket:
+    Type: String
+    Description: 'Source Bucket that contains api_swagger.json'
+  DestinationBucket:
+    Type: String
+    Description: 'Destination Bucket'
+  CognitoUserPoolId:
+    Type: String
+    Description: 'Cognito User Pool ID'
+Resources:
+  vpclink:  
+    Type: AWS::ApiGateway::VpcLink
+    Properties:
+      Name: 'MysfitsApiVpcLink'
+      TargetArns:
+        - !Ref loadbalancerarn
+  lambdas3role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 'LambdaS3Role'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: "LambdaS3RolePolicy"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Sid: AllowLogging
+            Effect: "Allow"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "*"
+          - Sid: Readfromsourcebucket
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetObject"
+            Resource: 
+              - "arn:aws:s3:::source250316"
+              - "arn:aws:s3:::source250316/*"
+          - Sid: writetodestinationbucket
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:PutObjectAcl"
+              - "s3:PutObjectVersionAcl"
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+              - "s3:CopyObject"
+            Resource: 
+              - "arn:aws:s3:::mani250316"
+              - "arn:aws:s3:::mani250316/*"
+  apiswaggerlambdafunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: 'index.handler'
+      Role: !GetAtt lambdas3role.Arn
+      Runtime: 'python3.8'
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+          import cfnresponse
+          import re
+          
+          from botocore.exceptions import ClientError
+          s3=boto3.resource('s3')
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          
+          def handler(event,context):
+              logger.info("Received event: %s" % json.dumps(event))
+              sourcebucket = event['ResourceProperties']['SourceBucket']
+              destinationbucket = event['ResourceProperties']['DestinationBucket']
+              vpcconnectionid = event['ResourceProperties']['VPCConnectionId']
+              nlbdns = event['ResourceProperties']['NLBDNS']
+              cognitouserpoolid = event['ResourceProperties']['CognitoUserPoolId']
+              
+              result = cfnresponse.SUCCESS
+              
+              try:
+                  update_apijson(sourcebucket,destinationbucket,vpcconnectionid,nlbdns,cognitouserpoolid)
+              except ClientError as e:
+                  logger.error('Error: %s', e)
+                  result = cfnresponse.FAILED
+              cfnresponse.send(event, context, result, {})
+          
+          def update_apijson(sourcebucket,destinationbucket,vpcconnectionid,nlbdns,cognitouserpoolid):
+              s3.Object(sourcebucket,'api-swagger.json').download_file('/tmp/api-swagger-source.json')
+              
+              with open('/tmp/api-swagger-source.json', 'r') as f:
+                  jsonfile = json.load(f)
+                  
+              jsonfile['securityDefinitions']['MysfitsUserPoolAuthorizer']['x-amazon-apigateway-authorizer']['providerARNs'][0] = cognitouserpoolid
+              
+              jsonfile['paths']['/']['get']['x-amazon-apigateway-integration']['connectionId']=vpcconnectionid
+              jsonfile['paths']['/']['get']['x-amazon-apigateway-integration']['uri']=re.sub(r'REPLACE_ME_NLB_DNS',nlbdns,jsonfile['paths']['/']['get']['x-amazon-apigateway-integration']['uri'])
+              
+              jsonfile['paths']['/mysfits']['get']['x-amazon-apigateway-integration']['connectionId']=vpcconnectionid
+              jsonfile['paths']['/mysfits']['get']['x-amazon-apigateway-integration']['uri']=re.sub(r'REPLACE_ME_NLB_DNS',nlbdns,jsonfile['paths']['/mysfits']['get']['x-amazon-apigateway-integration']['uri'])
+              
+              jsonfile['paths']['/mysfits/{mysfitId}']['get']['x-amazon-apigateway-integration']['connectionId']=vpcconnectionid
+              jsonfile['paths']['/mysfits/{mysfitId}']['get']['x-amazon-apigateway-integration']['uri']=re.sub(r'REPLACE_ME_NLB_DNS',nlbdns,jsonfile['paths']['/mysfits/{mysfitId}']['get']['x-amazon-apigateway-integration']['uri'])
+              
+              jsonfile['paths']['/mysfits/{mysfitId}/adopt']['post']['x-amazon-apigateway-integration']['connectionId']=vpcconnectionid
+              jsonfile['paths']['/mysfits/{mysfitId}/adopt']['post']['x-amazon-apigateway-integration']['uri']=re.sub(r'REPLACE_ME_NLB_DNS',nlbdns,jsonfile['paths']['/mysfits/{mysfitId}/adopt']['post']['x-amazon-apigateway-integration']['uri'])
+              
+              jsonfile['paths']['/mysfits/{mysfitId}/like']['post']['x-amazon-apigateway-integration']['connectionId']=vpcconnectionid
+              jsonfile['paths']['/mysfits/{mysfitId}/like']['post']['x-amazon-apigateway-integration']['uri']=re.sub(r'REPLACE_ME_NLB_DNS',nlbdns,jsonfile['paths']['/mysfits/{mysfitId}/like']['post']['x-amazon-apigateway-integration']['uri'])
+              
+              with open('/tmp/api-swagger-updated.json', 'w') as f:
+                  json.dump(jsonfile,f,indent=4)
+                  
+              s3.Object(destinationbucket,'api-swagger.json').upload_file('/tmp/api-swagger-updated.json')
+  updateapiswagger:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt apiswaggerlambdafunction.Arn
+      SourceBucket: !Ref SourceBucket
+      DestinationBucket: !Ref DestinationBucket
+      VPCConnectionId: !Ref vpclink
+      NLBDNS: !Ref loadbalancerdns
+      CognitoUserPoolId: !Ref CognitoUserPoolId
+  restapi:
+    Type: AWS::ApiGateway::RestApi
+    DependsOn:
+      - updateapiswagger
+      - vpclink
+    Properties:
+      EndpointConfiguration:
+        Types: 
+          - 'REGIONAL'
+      FailOnWarnings: true
+      BodyS3Location:
+        Bucket: !Ref DestinationBucket
+        Key: api-swagger.json
+  restapideployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref restapi
+      StageName: 'prod'
+      
+Outputs:
+  lambdarole:
+    Description: Lambda S3 Role ARN
+    Value: !GetAtt lambdas3role.Arn
+  mysfitsapiendpoint:
+    Description: API Endpoint for Mysfits Application
+    Value: 
+      Fn::Join:
+        - ''
+        - - 'https://'
+          - !Ref restapi
+          - '.execute.api.'
+          - !Ref AWS::Region
+          - '.amazonaws.com/prod'
+  

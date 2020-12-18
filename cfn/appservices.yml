@@ -1,0 +1,161 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create a modern web application stack
+Parameters:
+  vpcid:
+    Type: String
+    Description: VPC ID created for mysfit stack
+  dockerimageurl:
+    Type: String
+    Description: Docker Image URL
+Resources:
+  mysfitsecscluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: 'MythicalMysfits-Cluster'
+  mysfitsloggroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: mythicalmysfits-logs
+  mysfitsecrrepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: 'mythicalmysfits/service'
+  mysfitstaskdefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: mysfitsservice
+      Cpu: 256
+      Memory: 512
+      NetworkMode: 'awsvpc'
+      ExecutionRoleArn: !GetAtt EcsServiceRole.Arn
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: 'MythicalMysfits-Service'
+          Image: !Ref dockerimageurl
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: http
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref mysfitsloggroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: 'mysfits-ecs-service'
+  FargateContainerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the fargate containers from the Internet
+      VpcId: !Ref vpcid
+      SecurityGroupIngress:
+          # Allow access to NLB from anywhere on the internet
+          - CidrIp: '10.10.0.0/16'
+            IpProtocol: -1
+            
+  EcsServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ecs.amazonaws.com
+            - ecs-tasks.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: /
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action:
+              # Rules which allow ECS to attach network interfaces to instances
+              # on your behalf in order for awsvpc networking mode to work right
+              - 'ec2:AttachNetworkInterface'
+              - 'ec2:CreateNetworkInterface'
+              - 'ec2:CreateNetworkInterfacePermission'
+              - 'ec2:DeleteNetworkInterface'
+              - 'ec2:DeleteNetworkInterfacePermission'
+              - 'ec2:Describe*'
+              - 'ec2:DetachNetworkInterface'
+
+              # Rules which allow ECS to update load balancers on your behalf
+              # with the information sabout how to send traffic to your containers
+              - 'elasticloadbalancing:DeregisterInstancesFromLoadBalancer'
+              - 'elasticloadbalancing:DeregisterTargets'
+              - 'elasticloadbalancing:Describe*'
+              - 'elasticloadbalancing:RegisterInstancesWithLoadBalancer'
+              - 'elasticloadbalancing:RegisterTargets'
+
+              # Rules which allow ECS to run tasks that have IAM roles assigned to them.
+              - 'iam:PassRole'
+
+              # Rules that let ECS interact with container images.
+              - 'ecr:GetAuthorizationToken'
+              - 'ecr:BatchCheckLayerAvailability'
+              - 'ecr:GetDownloadUrlForLayer'
+              - 'ecr:BatchGetImage'
+
+              # Rules that let ECS create and push logs to CloudWatch.
+              - 'logs:DescribeLogStreams'
+              - 'logs:CreateLogStream'
+              - 'logs:CreateLogGroup'
+              - 'logs:PutLogEvents'
+
+            Resource: '*'
+
+  # This is a role which is used by the ECS tasks. Tasks in Amazon ECS define
+  # the containers that should be deployed togehter and the resources they
+  # require from a compute/memory perspective. So, the policies below will define
+  # the IAM permissions that our Mythical Mysfits docker containers will have.
+  # If you attempted to write any code for the Mythical Mysfits service that
+  # interacted with different AWS service APIs, these roles would need to include
+  # those as allowed actions.
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs-tasks.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+        - PolicyName: AmazonECSTaskRolePolicy
+          PolicyDocument:
+            Statement:
+            - Effect: Allow
+              Action:
+                # Allow the ECS Tasks to download images from ECR
+                - 'ecr:GetAuthorizationToken'
+                - 'ecr:BatchCheckLayerAvailability'
+                - 'ecr:GetDownloadUrlForLayer'
+                - 'ecr:BatchGetImage'
+
+                # Allow the ECS tasks to upload logs to CloudWatch
+                - 'logs:CreateLogStream'
+                - 'logs:CreateLogGroup'
+                - 'logs:PutLogEvents'
+              Resource: '*'
+
+            - Effect: Allow
+              Action:
+                # Allows the ECS tasks to interact with only the MysfitsTable
+                # in DynamoDB
+                - 'dynamodb:Scan'
+                - 'dynamodb:Query'
+                - 'dynamodb:UpdateItem'
+                - 'dynamodb:GetItem'
+              Resource: 'arn:aws:dynamodb:*:*:table/MysfitsTable*'
+Outputs:
+  MysfitsClusterName:
+    Description: Mysfits Cluster Name
+    Value: !Ref mysfitsecscluster
+  MysfitsTaskDefintionARN:
+    Description: ARN for the Task Definition
+    Value: !Ref mysfitstaskdefinition

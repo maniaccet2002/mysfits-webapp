@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create cognito user pool
+Resources:
+  userpool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: 'MysfitsUserPool'
+      AutoVerifiedAttributes: 
+        -   'email'
+  userpoolclient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: 'MysfitsUserPoolClient'
+      UserPoolId: !Ref userpool
+Outputs:
+  userpoolarn:
+    Description: ARN for the cognito user pool
+    Value: !GetAtt userpool.Arn

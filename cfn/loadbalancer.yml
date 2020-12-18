@@ -1,0 +1,59 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create API gateway
+Parameters:
+  VpcId:
+    Type: String
+    Description:  VPC ID
+  PublicSubnetA:
+    Type: String
+    Description: Public Subnet A
+  PublicSubnetB:
+    Type: String
+    Description: Public Subnet B
+Resources:
+  networklb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: 'mysfits-nlb'
+      Scheme: 'internet-facing'
+      Type: 'network'
+      Subnets:
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+  mysfitstargetgrp:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - networklb
+    Properties:
+      Name: 'MythicalMysfits-TargetGroup'
+      Port: 8080
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref VpcId
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: '/'
+      HealthCheckProtocol: 'HTTP'
+      HealthyThresholdCount: 3
+      UnhealthyThresholdCount: 3
+  mysfitslistener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn:
+      - mysfitstargetgrp
+    Properties:
+      LoadBalancerArn: !Ref networklb
+      Port: 80
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref mysfitstargetgrp
+Outputs:
+  loadbalancerarn:
+    Description: Network LoadBalancer ARN
+    Value: !Ref networklb
+  targetgrparn:
+    Description: TargetGroup ARN
+    Value: !Ref mysfitstargetgrp
+  loadbalancerdns:
+    Description: DNS Name for the loadbalancer
+    Value: !GetAtt networklb.DNSName
+    
