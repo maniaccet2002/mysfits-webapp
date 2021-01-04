@@ -1,35 +1,46 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Template to create API gateway
 Parameters:
-  VpcId:
+  stackname:
+    Type: String
+    Description: Main Stack Name
+  vpcid:
     Type: String
     Description:  VPC ID
-  PublicSubnetA:
+  publicsubnetA:
     Type: String
     Description: Public Subnet A
-  PublicSubnetB:
+  publicsubnetB:
     Type: String
     Description: Public Subnet B
 Resources:
   networklb:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: 'mysfits-nlb'
+      Name: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'nlb'
       Scheme: 'internet-facing'
       Type: 'network'
       Subnets:
-        - !Ref PublicSubnetA
-        - !Ref PublicSubnetB
+        - !Ref publicsubnetA
+        - !Ref publicsubnetB
   mysfitstargetgrp:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     DependsOn:
       - networklb
     Properties:
-      Name: 'MythicalMysfits-TargetGroup'
+      Name: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - '-targetgroup'
       Port: 8080
       Protocol: TCP
       TargetType: ip
-      VpcId: !Ref VpcId
+      VpcId: !Ref vpcid
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: '/'
       HealthCheckProtocol: 'HTTP'

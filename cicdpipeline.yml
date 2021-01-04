@@ -1,10 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Template to create CI/CD pipeline'
 Parameters:
-  ECSClusterName:
+  stackname:
+    Type: String
+    Description: Main Stack Name
+  ecsclustername:
     Type: String
     Description: ECS cluster name
-  ECSServiceName:
+  ecsservicename:
     Type: String
     Description: ECS Service Name
   ArtifactS3BucketName:
@@ -52,7 +55,11 @@ Resources:
   MysfitsCodePipelineServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: MysfitsCodePipelineServiceRole
+      RoleName: 
+        Fn::Join:
+          - ''
+          - - !Ref stackname
+            - 'CodePipelineServiceRole'
       AssumeRolePolicyDocument:
         Statement:
         - Effect: Allow
@@ -63,7 +70,11 @@ Resources:
           - sts:AssumeRole
       Path: "/"
       Policies:
-      - PolicyName: Mysfits-codepipeline-service-policy
+      - PolicyName:
+          Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'codepipeline-service-policy'
         PolicyDocument:
           Statement:
           - Action:
@@ -98,7 +109,11 @@ Resources:
   MysfitsCodeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: MysfitsCodeBuildServiceRole
+      RoleName: 
+        Fn::Join:
+          - ''
+          - - !Ref stackname
+            - 'CodeBuildServiceRole'
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -107,7 +122,11 @@ Resources:
             Service: codebuild.amazonaws.com
           Action: sts:AssumeRole
       Policies:
-      - PolicyName: "MysfitsService-CodeBuildServicePolicy"
+      - PolicyName:
+          Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'CodeBuildServicePolicy'
         PolicyDocument:
           Version: "2012-10-17"
           Statement:
@@ -146,12 +165,20 @@ Resources:
   coderepo:
     Type: AWS::CodeCommit::Repository
     Properties:
-      RepositoryName: mysfits-app
+      RepositoryName: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'app'
       RepositoryDescription: Code Commit repository for mysfits application
   codebuild:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: mysfits-app-build
+      Name: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'app-build'
       Description: Code Build for mysfits application
       ServiceRole: !GetAtt MysfitsCodeBuildServiceRole.Arn
       Source:
@@ -172,7 +199,11 @@ Resources:
   codepipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
-      Name: mysfits-app-codepipeline
+      Name: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'app-codepipeline'
       RoleArn: !GetAtt MysfitsCodePipelineServiceRole.Arn
       ArtifactStore:
         Type: S3
@@ -180,7 +211,11 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Name: mysfits-codecommit
+            - Name: 
+                Fn::Join:
+                  - '-'
+                  - - !Ref stackname
+                    - 'codecommit'
               ActionTypeId:
                 Category: Source
                 Owner: AWS
@@ -192,10 +227,18 @@ Resources:
                 PollForSourceChanges: False
                 OutputArtifactFormat: CODE_ZIP
               OutputArtifacts:
-                - Name: mysfitsapp-SourceArtifact
+                - Name: 
+                    Fn::Join:
+                      - '-'
+                      - - !Ref stackname
+                        - 'app-SourceArtifact'
         - Name: Build
           Actions:
-            - Name: mysfits-build
+            - Name: 
+                Fn::Join:
+                  - '-'
+                  - - !Ref stackname
+                    - 'build'
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -203,22 +246,134 @@ Resources:
                 Version: 1
               Configuration:
                 ProjectName: !Ref codebuild
-                PrimarySource: mysfitsapp-SourceArtifact
+                PrimarySource: 
+                  Fn::Join:
+                    - '-'
+                    - - !Ref stackname
+                      - 'app-SourceArtifact'
               InputArtifacts:
-                - Name: mysfitsapp-SourceArtifact
+                - Name: 
+                    Fn::Join:
+                      - '-'
+                      - - !Ref stackname
+                        - 'app-SourceArtifact'
               OutputArtifacts:
-                - Name: mysfitsapp-BuildArtifact
+                - Name: 
+                    Fn::Join:
+                      - '-'
+                      - - !Ref stackname
+                        - 'app-BuildArtifact'
         - Name: Deploy
           Actions:
-            - Name: mysfits-deploy
+            - Name: 
+                Fn::Join:
+                  - '-'
+                  - - !Ref stackname
+                    - 'deploy'
               ActionTypeId:
                 Category: Deploy
                 Owner: AWS
                 Provider: ECS
                 Version: 1
               Configuration:
-                ClusterName:  !Ref ECSClusterName
-                ServiceName:  !Ref ECSServiceName
+                ClusterName:  !Ref ecsclustername
+                ServiceName:  !Ref ecsservicename
                 DeploymentTimeout: 15
               InputArtifacts:
-                - Name: mysfitsapp-BuildArtifact
+                - Name: 
+                    Fn::Join:
+                      - '-'
+                      - - !Ref stackname
+                        - 'app-BuildArtifact'
+  lambdas3role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'lambdas3role4cicd'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: "LambdaS3RolePolicy"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Sid: AllowLogging
+            Effect: "Allow"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "*"
+          - Sid: writetodestinationbucket
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:ListBucketVersions"
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+            Resource: 
+              - 'Fn::Join':
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref ArtifactS3BucketName
+                    - '/*'
+              - 'Fn::Join':
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref ArtifactS3BucketName
+  artifactcleanuplambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: 'index.handler'
+      Role: !GetAtt lambdas3role.Arn
+      Runtime: 'python3.8'
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+          import cfnresponse
+          import re
+          
+          from botocore.exceptions import ClientError
+          s3=boto3.resource('s3')
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          def handler(event,context):
+              logger.info("Received event: %s" % json.dumps(event))
+              artifactbucket = event['ResourceProperties']['ArtifactBucket']
+              
+              result = cfnresponse.SUCCESS
+              
+              try:
+                  if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                      result = cfnresponse.SUCCESS
+                  elif event['RequestType'] == 'Delete':
+                      bucket = s3.Bucket(artifactbucket)
+                      bucket.object_versions.delete()
+              except ClientError as e:
+                  logger.error('Error: %s', e)
+                  result = cfnresponse.FAILED
+              cfnresponse.send(event, context, result, {})
+  artifactlambda:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt artifactcleanuplambda.Arn
+      ArtifactBucket: !Ref mysfitsartifact
+Outputs:
+  coderepourl:
+    Description: HTTPS URL for the code commit repository
+    Value: !GetAtt coderepo.CloneUrlHttp
+              
+              
+          

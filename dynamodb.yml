@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Stack to create AWS sample modern web application
+Parameters:
+  stackname:
+    Type: String
+    Description: Main Stack Name
+  vpcid:
+    Type: String
+    Description: VPC ID
+  privateroutetable:
+    Type: String
+    Description: Private Route table
+  s3bucket:
+    Type: String
+    Description: 'S3 bucket that contains populate-dynamodb.json'
+Resources:
+  mysfitstable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: 'MysfitsTable'
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+      AttributeDefinitions:
+        - AttributeName: "MysfitId"
+          AttributeType: "S"
+        - AttributeName: "GoodEvil"
+          AttributeType: "S"
+        - AttributeName: "LawChaos"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "MysfitId"
+          KeyType: "HASH"
+      GlobalSecondaryIndexes:
+        - IndexName: "LawChaosIndex"
+          KeySchema:
+            - AttributeName: "LawChaos"
+              KeyType: "HASH"
+            - AttributeName: "MysfitId"
+              KeyType: "RANGE"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+          Projection:
+            ProjectionType: "ALL"
+        - IndexName: "GoodEvilIndex"
+          KeySchema:
+            - AttributeName: "GoodEvil"
+              KeyType: "HASH"
+            - AttributeName: "MysfitId"
+              KeyType: "RANGE"
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+          Projection:
+            ProjectionType: "ALL"
+  mysfitsvpcendpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref vpcid
+      VpcEndpointType: 'Gateway'
+      ServiceName: !Join [ "", [ "com.amazonaws.", { "Ref": "AWS::Region" }, ".dynamodb" ] ]
+      RouteTableIds: 
+        - !Ref privateroutetable
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: "*"
+            Principal: "*"
+            Resource: "*"
+  lambdadynamodbrole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'lambdadynamodbrole'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: 
+          Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'LambdadynamodbRolePolicy'
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Sid: AllowLogging
+            Effect: "Allow"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "*"
+          - Sid: Readfromsourcebucket
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetObject"
+            Resource: 
+              - 'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref s3bucket
+              - 'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref s3bucket
+                  - '/*'
+          - Sid: dynamodbwrite
+            Effect: "Allow"
+            Action:
+              - 'dynamodb:ListTables'
+              - 'dynamodb:BatchWriteItem'
+            Resource: 
+              - !GetAtt mysfitstable.Arn
+  dbupdatelambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: 'index.handler'
+      Role: !GetAtt lambdadynamodbrole.Arn
+      Runtime: 'python3.8'
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import logging
+          import cfnresponse
+          from botocore.exceptions import ClientError
+          
+          dynamodb=boto3.client('dynamodb')
+          s3=boto3.resource('s3')
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          def handler(event,context):
+              logger.info("Received event: %s" % json.dumps(event))
+              sourcebucket = event['ResourceProperties']['SourceBucket']
+              tablename = event['ResourceProperties']['TableName']
+              result = cfnresponse.SUCCESS
+              
+              try:
+                  s3.Object(sourcebucket,'populate-dynamodb.json').download_file('/tmp/populate-dynamodb.json')
+                  with open('/tmp/populate-dynamodb.json','r') as f:
+                      jsonfile = json.load(f)
+                      tableitems = {}
+                      tableitems[tablename] = jsonfile['MysfitsTable']
+                      response = dynamodb.batch_write_item(RequestItems=tableitems)
+                      if response['UnprocessedItems'] != {}:
+                          result = cfnresponse.FAILED
+              except ClientError as e:
+                  logger.error('Error: %s', e)
+                  result = cfnresponse.FAILED
+              cfnresponse.send(event, context, result, {})
+  populatemysfitstable:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt dbupdatelambda.Arn
+      SourceBucket: !Ref s3bucket
+      TableName: !Ref mysfitstable

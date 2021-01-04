@@ -1,6 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Template to create API gateway
+Description: Template to create cognito user pool
 Parameters:
+  stackname:
+    Type: String
+    Description: Main Stack Name
   loadbalancerarn:
     Type: String
     Description: 'Network Load balancer ARN'
@@ -10,23 +13,44 @@ Parameters:
   SourceBucket:
     Type: String
     Description: 'Source Bucket that contains api_swagger.json'
-  DestinationBucket:
-    Type: String
-    Description: 'Destination Bucket'
-  CognitoUserPoolId:
-    Type: String
-    Description: 'Cognito User Pool ID'
 Resources:
+  userpool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        Fn::Join:
+          - ''
+          - - !Ref stackname
+            - 'userpool'
+      AutoVerifiedAttributes: 
+        -   'email'
+  userpoolclient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: 
+        Fn::Join:
+          - ''
+          - - !Ref stackname
+            - 'userpoolclient'
+      UserPoolId: !Ref userpool
   vpclink:  
     Type: AWS::ApiGateway::VpcLink
     Properties:
-      Name: 'MysfitsApiVpcLink'
+      Name: 
+        Fn::Join:
+              - ''
+              - - !Ref stackname
+                - 'ApiVpcLink'
       TargetArns:
         - !Ref loadbalancerarn
   lambdas3role:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: 'LambdaS3Role'
+      RoleName:
+        Fn::Join:
+              - '-'
+              - - !Ref stackname
+                - 'LambdaS3Role'
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -35,7 +59,11 @@ Resources:
             Service: lambda.amazonaws.com
           Action: sts:AssumeRole
       Policies:
-      - PolicyName: "LambdaS3RolePolicy"
+      - PolicyName:
+          Fn::Join:
+              - '-'
+              - - !Ref stackname
+                - "LambdaS3RolePolicy"
         PolicyDocument:
           Version: "2012-10-17"
           Statement:
@@ -51,9 +79,16 @@ Resources:
             Action:
               - "s3:ListBucket"
               - "s3:GetObject"
-            Resource: 
-              - "arn:aws:s3:::source250316"
-              - "arn:aws:s3:::source250316/*"
+            Resource:
+              - 'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref SourceBucket
+              - 'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref SourceBucket
+                  - '/*'
           - Sid: writetodestinationbucket
             Effect: "Allow"
             Action:
@@ -66,8 +101,15 @@ Resources:
               - "s3:DeleteObjectVersion"
               - "s3:CopyObject"
             Resource: 
-              - "arn:aws:s3:::mani250316"
-              - "arn:aws:s3:::mani250316/*"
+              - 'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref SourceBucket
+              - 'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref SourceBucket
+                  - '/*'
   apiswaggerlambdafunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -92,7 +134,6 @@ Resources:
           def handler(event,context):
               logger.info("Received event: %s" % json.dumps(event))
               sourcebucket = event['ResourceProperties']['SourceBucket']
-              destinationbucket = event['ResourceProperties']['DestinationBucket']
               vpcconnectionid = event['ResourceProperties']['VPCConnectionId']
               nlbdns = event['ResourceProperties']['NLBDNS']
               cognitouserpoolid = event['ResourceProperties']['CognitoUserPoolId']
@@ -100,14 +141,14 @@ Resources:
               result = cfnresponse.SUCCESS
               
               try:
-                  update_apijson(sourcebucket,destinationbucket,vpcconnectionid,nlbdns,cognitouserpoolid)
+                  update_apijson(sourcebucket,vpcconnectionid,nlbdns,cognitouserpoolid)
               except ClientError as e:
                   logger.error('Error: %s', e)
                   result = cfnresponse.FAILED
               cfnresponse.send(event, context, result, {})
           
-          def update_apijson(sourcebucket,destinationbucket,vpcconnectionid,nlbdns,cognitouserpoolid):
-              s3.Object(sourcebucket,'api-swagger.json').download_file('/tmp/api-swagger-source.json')
+          def update_apijson(sourcebucket,vpcconnectionid,nlbdns,cognitouserpoolid):
+              s3.Object(sourcebucket,'api-swagger-source.json').download_file('/tmp/api-swagger-source.json')
               
               with open('/tmp/api-swagger-source.json', 'r') as f:
                   jsonfile = json.load(f)
@@ -132,16 +173,15 @@ Resources:
               with open('/tmp/api-swagger-updated.json', 'w') as f:
                   json.dump(jsonfile,f,indent=4)
                   
-              s3.Object(destinationbucket,'api-swagger.json').upload_file('/tmp/api-swagger-updated.json')
+              s3.Object(sourcebucket,'api-swagger.json').upload_file('/tmp/api-swagger-updated.json')
   updateapiswagger:
     Type: AWS::CloudFormation::CustomResource
     Properties:
       ServiceToken: !GetAtt apiswaggerlambdafunction.Arn
       SourceBucket: !Ref SourceBucket
-      DestinationBucket: !Ref DestinationBucket
       VPCConnectionId: !Ref vpclink
       NLBDNS: !Ref loadbalancerdns
-      CognitoUserPoolId: !Ref CognitoUserPoolId
+      CognitoUserPoolId: !GetAtt userpool.Arn
   restapi:
     Type: AWS::ApiGateway::RestApi
     DependsOn:
@@ -153,7 +193,7 @@ Resources:
           - 'REGIONAL'
       FailOnWarnings: true
       BodyS3Location:
-        Bucket: !Ref DestinationBucket
+        Bucket: !Ref SourceBucket
         Key: api-swagger.json
   restapideployment:
     Type: AWS::ApiGateway::Deployment
@@ -172,7 +212,16 @@ Outputs:
         - ''
         - - 'https://'
           - !Ref restapi
-          - '.execute.api.'
+          - '.execute-api.'
           - !Ref AWS::Region
           - '.amazonaws.com/prod'
+  userpoolarn:
+    Description: ARN for the cognito user pool
+    Value: !GetAtt userpool.Arn
+  userpoolid:
+    Description: Cognito User Pool ID
+    Value: !Ref userpool
+  userpoolclientid:
+    Description: ClientID of the UserPool
+    Value: !Ref userpoolclient
   

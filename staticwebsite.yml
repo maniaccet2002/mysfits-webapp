@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create Static website on S3
+Parameters:
+  stackname:
+    Type: String
+    Description: Main Stack Name
+  s3bucketname:
+    Type: String
+    Description: Bucket Name to host static website
+  sourcebucket:
+    Type: String
+    Description: Source Bucket that contains api_swagger.json
+  mysfitsapiendpoint:
+    Type: String
+    Description: API Endpoint for Mysfits application
+  cognitouserpoolid:
+    Type: String
+    Description: Cognito User Pool ID
+  cognitouserpoolclientid:
+    Type: String
+    Description: Cognito User Pool Client ID
+Resources:
+  S3bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref s3bucketname
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+    DeletionPolicy: Delete  
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3bucket
+      PolicyDocument:
+        Statement:
+          - Sid: PublicReadForGetBucketObjects
+            Action: 's3:GetObject'
+            Effect: 'Allow'
+            Principal: '*'
+            Resource: 
+              'Fn::Join':
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref S3bucket
+                  - '/*'
+  lambdas3role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: 
+        Fn::Join:
+          - '-'
+          - - !Ref stackname
+            - 'lambdas3role4staticwebsite'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Policies:
+      - PolicyName: "LambdaS3RolePolicy"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Sid: AllowLogging
+            Effect: "Allow"
+            Action:
+              - "logs:CreateLogGroup"
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: "*"
+          - Sid: Readfromsourcebucket
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetObject"
+            Resource: 
+              - 'Fn::Join':
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref sourcebucket
+                    - '/*'
+              - 'Fn::Join':
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref sourcebucket
+          - Sid: writetodestinationbucket
+            Effect: "Allow"
+            Action:
+              - "s3:ListBucket"
+              - "s3:GetObject"
+              - "s3:PutObject"
+              - "s3:PutObjectAcl"
+              - "s3:PutObjectVersionAcl"
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+              - "s3:CopyObject"
+            Resource: 
+              - 'Fn::Join':
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref s3bucketname
+                    - '/*'
+              - 'Fn::Join':
+                  - ''
+                  - - 'arn:aws:s3:::'
+                    - !Ref s3bucketname
+  updatehtmlsfunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: 'lambda_function.handler'
+      Role: !GetAtt lambdas3role.Arn
+      Runtime: 'python3.8'
+      Timeout: 120
+      Code:
+        S3Bucket: !Ref sourcebucket
+        S3Key: 'lambda_function.zip'
+  updatehtmls:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt updatehtmlsfunction.Arn
+      SourceBucket: !Ref sourcebucket
+      DestinationBucket: !Ref S3bucket
+      MysfitsApiEndpoint: !Ref mysfitsapiendpoint
+      CognitoUserPoolClientId: !Ref cognitouserpoolclientid
+      CognitoUserPoolId: !Ref cognitouserpoolid
+      AWSRegion: !Ref AWS::Region
+      FunctionName: !Ref updatehtmlsfunction

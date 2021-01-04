@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to create a modern web application stack
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Bucket Name to host static website
+    Default: 'mysfits250316'
+  ArtifactS3BucketName:
+    Type: String
+    Description: Bucket Name to host Build artifacts
+    Default: 'mysfitsartifact250316'
+  DockerImageUrl:
+    Type: String
+    Description: Docker image for the ECS Task definition
+    Default: '429722698419.dkr.ecr.us-east-1.amazonaws.com/mysfits/ubuntu:18.04'
+  SourceBucket:
+    Type: String
+    Description: Source Bucket that contains the yml files
+    Default: 'mysfitssource250316'
+Resources:
+  vpcstack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/vpc.yml'
+  loadbalancer:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/loadbalancer.yml'
+      Parameters:
+        vpcid: !GetAtt vpcstack.Outputs.VpcId
+        publicsubnetA: !GetAtt vpcstack.Outputs.WebAsubnetid
+        publicsubnetB: !GetAtt vpcstack.Outputs.WebBsubnetid
+        stackname: !Ref AWS::StackName
+  ecsservices:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/ecsservices.yml'
+      Parameters:
+        stackname: !Ref AWS::StackName
+        vpcid: !GetAtt vpcstack.Outputs.VpcId
+        dockerimageurl: !Ref DockerImageUrl
+        mysfitstargetgrp: !GetAtt loadbalancer.Outputs.targetgrparn
+        privatesubnetA: !GetAtt vpcstack.Outputs.AppAsubnetid
+        privatesubnetB: !GetAtt vpcstack.Outputs.AppBsubnetid
+  apiservices:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/apiservices.yml'
+      Parameters:
+        stackname: !Ref AWS::StackName
+        loadbalancerarn: !GetAtt loadbalancer.Outputs.loadbalancerarn
+        loadbalancerdns: !GetAtt loadbalancer.Outputs.loadbalancerdns
+        SourceBucket: !Ref SourceBucket
+  cicdpipeline:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/cicdpipeline.yml'
+      Parameters:
+        stackname: !Ref AWS::StackName
+        ecsclustername: !GetAtt ecsservices.Outputs.MysfitsClusterName
+        ecsservicename: !GetAtt ecsservices.Outputs.ServiceName
+        ArtifactS3BucketName: !Ref ArtifactS3BucketName
+  dynamodb:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: 
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/dynamodb.yml'
+      Parameters:
+        stackname: !Ref AWS::StackName
+        vpcid: !GetAtt vpcstack.Outputs.VpcId
+        privateroutetable: !GetAtt vpcstack.Outputs.privateroutetableid
+        s3bucket: !Ref SourceBucket
+  staticwebsite:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL:
+        'Fn::Join':
+          - ''
+          - - 'https://'
+            - !Ref SourceBucket
+            - '.s3.amazonaws.com/staticwebsite.yml'
+      Parameters:
+        stackname: !Ref AWS::StackName
+        s3bucketname: !Ref S3BucketName
+        sourcebucket: !Ref SourceBucket
+        mysfitsapiendpoint: !GetAtt apiservices.Outputs.mysfitsapiendpoint
+        cognitouserpoolid:  !GetAtt apiservices.Outputs.userpoolid
+        cognitouserpoolclientid:  !GetAtt apiservices.Outputs.userpoolclientid
+Outputs:
+  websiteurl:
+    Description: URL for the websiteurl
+    Value: 
+      Fn::Join:
+        - ''
+        - - 'http://'
+          - !Ref S3BucketName
+          - '.s3-website-us-east-1.amazonaws.com'
+  coderepourl:
+    Description: HTTPS URL for the code commit repository
+    Value: !GetAtt cicdpipeline.Outputs.coderepourl

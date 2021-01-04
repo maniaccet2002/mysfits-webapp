@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
+  <!--
+    A new version of the Mythical Mysfits website that has enabled user
+    registration and login, as well as the ability to logged in users to like
+    and mark mysfits as adopted.
+  -->
   <head>
-    <!--
-      A new version of the Mythical Mysfits API that includes updated JavaScript
-      code to send an additional PUT request whenever a mysfit profile is viewed
-      by a user.
-    -->
     <title>Mythical Mysfits</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -126,7 +126,7 @@
             <p id="profileName"><b>Name:</b> {{profileMysfit.name}}</p>
             <p id="profileSpecies"><b>Species:</b> {{profileMysfit.species}}</p>
             <p id="profileGoodEvil"><b>Good/Evil:</b> {{profileMysfit.goodevil}} </p>
-            <p id="profileLawChaos"><b>Lawful/Chaotic:</b>{{profileMysfit.lawchaos}} </p>
+            <p id="profileLawChaos"><b>Lawful/Chaotic:</b> {{profileMysfit.lawchaos}} </p>
             <p id="profileAge"><b>Age:</b> {{profileMysfit.age}}</p>
             <p id="profileDescription"><b>Description:</b> {{profileMysfit.description}}</p>
             <p id="profileLikes"><b>Likes:</b> {{profileMysfit.likes}}</p>
@@ -150,8 +150,6 @@
   <script>
 
     var mysfitsApiEndpoint = 'REPLACE_ME'; // example: 'https://abcd12345.execute-api.us-east-1.amazonaws.com/prod'
-    var streamingApiEndpoint = 'REPLACE_ME'; // example: 'https://abcd12345.execute-api.us-east-1.amazonaws.com/prod'
-
     var cognitoUserPoolId = 'REPLACE_ME';  // example: 'us-east-1_abcd12345'
     var cognitoUserPoolClientId = 'REPLACE_ME'; // example: 'abcd12345abcd12345abcd12345'
     var awsRegion = 'REPLACE_ME'; // example: 'us-east-1' or 'eu-west-1' etc.
@@ -273,7 +271,6 @@
 
       });
     }
-
 
     function refreshAWSCredentials() {
 
@@ -412,16 +409,10 @@
 
     });
 
-    /*
-      A new event handling funciton if the profile modal is triggered,
-      to record that click event and sent it to our new streaming service
-      backend.
-    */
     $('#profileModal').on('show.bs.modal', function (event) {
       var button = $(event.relatedTarget);
       var mysfitId = button.data('mysfitid');
       getMysfit(mysfitId, updateModalText);
-      recordProfileClick(mysfitId)
 
 
     });
@@ -495,7 +486,7 @@
           }
         });
       } catch(err) {
-        alert("You must be logged in to like a mysfit");
+        alert("You must be logged in to like a mysfit.");
         console.log(err.message);
       }
 
@@ -526,8 +517,8 @@
              }
           }
         });
-      } catch(err) {
-        alert("You must be logged in to adopt a mysfit");
+      } catch (err) {
+        alert("You must be logged in to adopt a mysfit.");
         console.log(err.message);
       }
 
@@ -571,42 +562,6 @@
       });
     }
 
-  /*
-   The new JavaScript function created for module-5 that records profile clicks.
-  */
-  function recordProfileClick(clickedMysfitId) {
-
-    var clicksApi = streamingApiEndpoint + '/clicks';
-    var userClick;
-
-    currentUserId = localStorage.getItem('userId');
-    if (currentUserId == null) {
-      currentUserId = 'guest';
-    }
-
-    userClick = {
-      userId: currentUserId,
-      mysfitId: clickedMysfitId
-    }
-
-    console.log('Recording profile click: ' + userClick);
-
-    $.ajax({
-      url : clicksApi,
-      type : 'PUT',
-      headers : {'Content-Type': 'application/json'},
-      dataType: 'json',
-      data : JSON.stringify(userClick),
-      success : function(response) {
-        console.log("click recorded!")
-      },
-      error : function(response) {
-        console.log("could not record click");
-        console.log(response);
-      }
-    });
-
-  }
 
   </script>
 </html>
