@@ -1,6 +1,6 @@
-Mythical Mysfits - A Modern Web application in Python
+# Mythical Mysfits - A Modern Web application in Python
 
-Overview
+## Overview
 
 Mythical Mysfits is a sample web application provided by AWS which is built using services like S3, API Gateway, DynamoDB, Cognito, ECS and CI/CD pipeline
 This application enables visitors to adopt a fantasy creature (mysfit) as pet. You can see a working sample of this website at: www.mythicalmysfits.com
@@ -13,7 +13,7 @@ This project contains cloudformation templates to build this sample web applicat
 
 
 
-Getting Started
+## Getting Started
 
 To create the cloudformation Stack, use the below link and use the default parameters
 
