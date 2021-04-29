@@ -18,3 +18,6 @@ This project contains cloudformation templates to build this sample web applicat
 To create the cloudformation Stack, use the below link and use the default parameters
 
 https://console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/quickcreate?templateURL=https://mysfitssource250316.s3.amazonaws.com/template.yml&stackName=mysfits
+
+### Caution
+While most of the resources created by this cloudformation stack comes under AWS free tier, there are some resources like interface endpoints, NAT Gateway which incurs charges
